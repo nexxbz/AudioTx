@@ -1,0 +1,19 @@
+AudioTx - audio del telefono (Android 10+) a la PC (Windows 7)
+
+COMPILAR CON GITHUB (sin instalar nada)
+1. Crea un repositorio en github.com y sube el contenido de esta carpeta.
+   La carpeta oculta .github\workflows\build.yml debe quedar en el repo
+   (si no se sube, crea el archivo a mano: Add file > Create new file).
+2. Entra en la pestana Actions > Build > Run workflow.
+3. Cuando termine (unos minutos), abre la ejecucion y descarga en "Artifacts":
+   - AudioTx-apk  -> app-debug.apk (instalar en el telefono)
+   - AudioTx-receptor-windows -> receptor64.exe y receptor32.exe
+
+USO
+1. Instala el APK, abre la app, pulsa "Iniciar transmision" y acepta los permisos.
+2. Conecta el telefono por USB con depuracion USB activada.
+3. En la PC ejecuta receptor32.exe (o receptor64.exe si tu Windows 7 es de 64 bits).
+   adb debe estar en el PATH o junto al .exe.
+
+Al subir o bajar el volumen del telefono, el sonido en la PC sube o baja igual.
+Nota: algunas apps bloquean la captura de su audio.
