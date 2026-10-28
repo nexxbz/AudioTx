@@ -94,6 +94,7 @@ static BOOL WINAPI on_close(DWORD ev) {
 int main(void) {
     WSADATA w;
     static char pl[BUFSZ];
+    int got = 0, waiting = 0;
     WSAStartup(MAKEWORD(2, 2), &w);
     SetConsoleCtrlHandler(on_close, TRUE);
     printf("Receptor de audio del telefono\n");
@@ -111,19 +112,24 @@ int main(void) {
         a.sin_addr.s_addr = inet_addr("127.0.0.1");
         if (connect(s, (struct sockaddr *)&a, sizeof a) != 0) { closesocket(s); Sleep(1000); continue; }
         setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char *)&nd, sizeof nd);
-        printf("Conectado.\n");
-        reset_audio();
+        got = 0;
         while (recv_all(s, hd, 3)) {
             int type = (unsigned char)hd[0];
             int len = ((unsigned char)hd[1] << 8) | (unsigned char)hd[2];
             if (len > BUFSZ) break;
             if (len && !recv_all(s, pl, len)) break;
+            if (!got) { got = 1; waiting = 0; printf("Conectado.\n"); reset_audio(); }
             if (type == 0) play(pl, len & ~3);
             else if (type == 1 && len >= 1) set_volume((unsigned char)pl[0]);
         }
         closesocket(s);
-        printf("\nDesconectado. Esperando al telefono...\n");
-        Sleep(800);
+        if (got) {
+            printf("\nDesconectado. Esperando al telefono...\n");
+        } else if (!waiting) {
+            printf("Esperando al telefono (abre la app AudioTx y pulsa Iniciar)...\n");
+            waiting = 1;
+        }
+        Sleep(1000);
     }
     return 0;
 }

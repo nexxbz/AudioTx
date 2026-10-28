@@ -18,7 +18,9 @@ import android.media.projection.MediaProjectionManager
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.Looper
 import android.provider.Settings
+import android.widget.Toast
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -74,24 +76,36 @@ class AudioService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
+    private fun fail(msg: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
+        }
+        stopSelf()
+    }
+
     private fun loop() {
-        val cfg = AudioPlaybackCaptureConfiguration.Builder(projection!!)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
-        val fmt = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(48000)
-            .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-            .build()
-        val rec = AudioRecord.Builder()
-            .setAudioFormat(fmt)
-            .setBufferSizeInBytes(3840 * 8)
-            .setAudioPlaybackCaptureConfig(cfg)
-            .build()
-        val buf = ByteArray(3840) // 20 ms
+        var rec: AudioRecord? = null
         try {
+            val cfg = AudioPlaybackCaptureConfiguration.Builder(projection!!)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .build()
+            val fmt = AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(48000)
+                .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
+                .build()
+            rec = AudioRecord.Builder()
+                .setAudioFormat(fmt)
+                .setBufferSizeInBytes(3840 * 8)
+                .setAudioPlaybackCaptureConfig(cfg)
+                .build()
+            if (rec.state != AudioRecord.STATE_INITIALIZED) {
+                fail("El teléfono bloquea la captura de audio (AudioRecord no se inició)")
+                return
+            }
+            val buf = ByteArray(3840) // 20 ms
             val ss = ServerSocket()
             ss.reuseAddress = true
             ss.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), PORT)) // solo accesible por adb forward
@@ -103,9 +117,13 @@ class AudioService : Service() {
                 lastVol = -1
                 sendVolume()
                 rec.startRecording()
+                if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                    fail("No se pudo iniciar la captura de audio")
+                    return
+                }
                 while (!stopping) {
                     val n = rec.read(buf, 0, buf.size)
-                    if (n < 0) break
+                    if (n < 0) { fail("Error de captura de audio (código $n)"); return }
                     if (n == 0) continue
                     if (!send(0, buf, n)) break
                 }
@@ -113,8 +131,9 @@ class AudioService : Service() {
                 closeClient()
             }
         } catch (e: Exception) {
+            if (!stopping) fail("Error: ${e.message}")
         } finally {
-            rec.release()
+            rec?.release()
         }
     }
 
