@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="key_service_desc">Permite que los botones de volumen del teléfono y del control Bluetooth controlen el volumen de la PC mientras AudioTx está conectado. No lee ni guarda nada de la pantalla.</string>
+</resources>

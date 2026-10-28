@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
@@ -24,6 +25,10 @@ class MainActivity : Activity() {
         }
         chk = CheckBox(this).apply { text = "Silenciar el teléfono mientras está conectado a la PC"; isChecked = true }
         btn = Button(this)
+        val acc = Button(this).apply {
+            text = "Activar botones de volumen (Accesibilidad)"
+            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
         btn.setOnClickListener {
             if (AudioService.running) {
                 stopService(Intent(this, AudioService::class.java))
@@ -32,7 +37,7 @@ class MainActivity : Activity() {
                 requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
             } else askProjection()
         }
-        box.addView(info); box.addView(chk); box.addView(btn)
+        box.addView(info); box.addView(chk); box.addView(acc); box.addView(btn)
         setContentView(box)
     }
 

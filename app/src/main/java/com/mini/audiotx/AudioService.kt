@@ -23,6 +23,7 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.view.KeyEvent
 import android.widget.Toast
 import java.io.OutputStream
 import java.net.InetAddress
@@ -38,6 +39,8 @@ import java.net.Socket
 class AudioService : Service() {
     companion object {
         @Volatile var running = false
+        @Volatile var instance: AudioService? = null
+        @Volatile var pcControl = false
         const val PORT = 7000
     }
 
@@ -76,6 +79,7 @@ class AudioService : Service() {
         projection = getSystemService(MediaProjectionManager::class.java).getMediaProjection(code, data)
         am = getSystemService(AudioManager::class.java)
         running = true
+        instance = this
         muteMode = intent.getBooleanExtra("mute", true)
         val ht = HandlerThread("vol").also { it.start() }
         obsThread = ht
@@ -193,6 +197,15 @@ class AudioService : Service() {
         bg?.post { sendPcVolume() }
     }
 
+    /** Lo llama KeyService con las teclas de volumen (botones del teléfono o control Bluetooth). */
+    fun keyVolume(code: Int) {
+        when (code) {
+            KeyEvent.KEYCODE_VOLUME_UP -> setPcVol(pcVol + 6)
+            KeyEvent.KEYCODE_VOLUME_DOWN -> setPcVol(pcVol - 6)
+            KeyEvent.KEYCODE_VOLUME_MUTE -> setMuted(!pcMuted)
+        }
+    }
+
     private fun setMuted(m: Boolean) {
         pcMuted = m
         bg?.post { sendPcVolume() }
@@ -220,6 +233,7 @@ class AudioService : Service() {
         s.setPlaybackToRemote(p)
         s.isActive = true
         session = s
+        pcControl = true
         sendPcVolume()
     }
 
@@ -227,6 +241,7 @@ class AudioService : Service() {
         try { session?.release() } catch (e: Exception) {}
         session = null
         provider = null
+        pcControl = false
     }
 
     /** Silencia el teléfono mientras hay una PC conectada. */
@@ -255,6 +270,8 @@ class AudioService : Service() {
     override fun onDestroy() {
         stopping = true
         running = false
+        instance = null
+        pcControl = false
         observer?.let { contentResolver.unregisterContentObserver(it) }
         obsThread?.quitSafely()
         try { server?.close() } catch (e: Exception) {}
