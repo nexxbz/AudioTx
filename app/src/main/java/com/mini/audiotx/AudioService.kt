@@ -50,7 +50,7 @@ class AudioService : Service() {
     private var observer: ContentObserver? = null
     private val lock = Any()
     private var out: OutputStream? = null
-    private var muteMode = true
+    @Volatile private var muteMode = true
     private var savedVol = -1
     private var session: MediaSession? = null
     private var provider: VolumeProvider? = null
@@ -84,7 +84,7 @@ class AudioService : Service() {
         val ht = HandlerThread("vol").also { it.start() }
         obsThread = ht
         bg = Handler(ht.looper)
-        if (!muteMode) startVolumeWatcher()
+        startVolumeWatcher()
         Thread { loop() }.start()
         return START_NOT_STICKY
     }
@@ -131,6 +131,11 @@ class AudioService : Service() {
             while (!stopping) {
                 val c = try { ss.accept() } catch (e: Exception) { break }
                 c.tcpNoDelay = true
+                // Vigila la conexión: si la PC o el cable se desconectan, cierra el socket
+                Thread {
+                    try { c.getInputStream().read() } catch (e: Exception) {}
+                    try { c.close() } catch (e: Exception) {}
+                }.start()
                 synchronized(lock) { client = c; out = c.getOutputStream() }
                 if (muteMode) { muteForPc(); startRemoteVolume() } else { lastVol = -1; sendVolume() }
                 rec.startRecording()
@@ -179,7 +184,7 @@ class AudioService : Service() {
 
     private fun startVolumeWatcher() {
         val o = object : ContentObserver(bg) {
-            override fun onChange(selfChange: Boolean) { sendVolume() }
+            override fun onChange(selfChange: Boolean) { if (!muteMode) sendVolume() }
         }
         contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, o)
         observer = o
@@ -195,6 +200,27 @@ class AudioService : Service() {
         pcVol = v.coerceIn(0, 100)
         provider?.currentVolume = pcVol
         bg?.post { sendPcVolume() }
+    }
+
+    val isMuteMode: Boolean get() = muteMode
+
+    /** Cambia el modo en caliente, también con la PC ya conectada. */
+    fun setMuteMode(m: Boolean) {
+        if (m == muteMode) return
+        muteMode = m
+        bg?.post {
+            val connected = synchronized(lock) { client != null }
+            if (!connected) return@post
+            if (m) {
+                muteForPc()
+                startRemoteVolume()
+            } else {
+                stopRemoteVolume()
+                restorePhone()
+                lastVol = -1
+                sendVolume()
+            }
+        }
     }
 
     /** Lo llama KeyService con las teclas de volumen (botones del teléfono o control Bluetooth). */

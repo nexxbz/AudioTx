@@ -24,6 +24,7 @@ class MainActivity : Activity() {
             textSize = 16f
         }
         chk = CheckBox(this).apply { text = "Silenciar el teléfono mientras está conectado a la PC"; isChecked = true }
+        chk.setOnCheckedChangeListener { _, on -> AudioService.instance?.setMuteMode(on) }
         btn = Button(this)
         val acc = Button(this).apply {
             text = "Activar botones de volumen (Accesibilidad)"
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         btn.text = if (AudioService.running) "Detener transmisión" else "Iniciar transmisión"
+        AudioService.instance?.let { chk.isChecked = it.isMuteMode }
     }
 
     private fun askProjection() {
