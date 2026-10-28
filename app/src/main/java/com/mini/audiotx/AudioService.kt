@@ -15,6 +15,9 @@ import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.media.VolumeProvider
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
@@ -44,6 +47,13 @@ class AudioService : Service() {
     private var observer: ContentObserver? = null
     private val lock = Any()
     private var out: OutputStream? = null
+    private var muteMode = true
+    private var savedVol = -1
+    private var session: MediaSession? = null
+    private var provider: VolumeProvider? = null
+    @Volatile private var pcVol = 50
+    @Volatile private var pcMuted = false
+    private var bg: Handler? = null
     private var client: Socket? = null
     @Volatile private var lastVol = -1
     @Volatile private var stopping = false
@@ -66,7 +76,11 @@ class AudioService : Service() {
         projection = getSystemService(MediaProjectionManager::class.java).getMediaProjection(code, data)
         am = getSystemService(AudioManager::class.java)
         running = true
-        startVolumeWatcher()
+        muteMode = intent.getBooleanExtra("mute", true)
+        val ht = HandlerThread("vol").also { it.start() }
+        obsThread = ht
+        bg = Handler(ht.looper)
+        if (!muteMode) startVolumeWatcher()
         Thread { loop() }.start()
         return START_NOT_STICKY
     }
@@ -114,8 +128,7 @@ class AudioService : Service() {
                 val c = try { ss.accept() } catch (e: Exception) { break }
                 c.tcpNoDelay = true
                 synchronized(lock) { client = c; out = c.getOutputStream() }
-                lastVol = -1
-                sendVolume()
+                if (muteMode) { muteForPc(); startRemoteVolume() } else { lastVol = -1; sendVolume() }
                 rec.startRecording()
                 if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
                     fail("No se pudo iniciar la captura de audio")
@@ -129,6 +142,8 @@ class AudioService : Service() {
                 }
                 try { rec.stop() } catch (e: Exception) {}
                 closeClient()
+                stopRemoteVolume()
+                restorePhone()
             }
         } catch (e: Exception) {
             if (!stopping) fail("Error: ${e.message}")
@@ -159,13 +174,75 @@ class AudioService : Service() {
     }
 
     private fun startVolumeWatcher() {
-        val ht = HandlerThread("vol").also { it.start() }
-        obsThread = ht
-        val o = object : ContentObserver(Handler(ht.looper)) {
+        val o = object : ContentObserver(bg) {
             override fun onChange(selfChange: Boolean) { sendVolume() }
         }
         contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, o)
         observer = o
+    }
+
+    private fun sendPcVolume() {
+        val v = if (pcMuted) 0 else pcVol
+        send(1, byteArrayOf(v.toByte()), 1)
+    }
+
+    private fun setPcVol(v: Int) {
+        pcMuted = false
+        pcVol = v.coerceIn(0, 100)
+        provider?.currentVolume = pcVol
+        bg?.post { sendPcVolume() }
+    }
+
+    private fun setMuted(m: Boolean) {
+        pcMuted = m
+        bg?.post { sendPcVolume() }
+    }
+
+    /** Los botones de volumen del teléfono pasan a controlar el volumen de la PC. */
+    private fun startRemoteVolume() {
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        pcVol = if (savedVol >= 0) savedVol * 100 / max else 50
+        pcMuted = false
+        val p = object : VolumeProvider(VolumeProvider.VOLUME_CONTROL_ABSOLUTE, 100, pcVol) {
+            override fun onSetVolumeTo(volume: Int) { setPcVol(volume) }
+            override fun onAdjustVolume(direction: Int) {
+                when (direction) {
+                    1, -1 -> setPcVol(pcVol + direction * 6)
+                    AudioManager.ADJUST_MUTE -> setMuted(true)
+                    AudioManager.ADJUST_UNMUTE -> setMuted(false)
+                    AudioManager.ADJUST_TOGGLE_MUTE -> setMuted(!pcMuted)
+                }
+            }
+        }
+        provider = p
+        val s = MediaSession(this, "AudioTx")
+        s.setPlaybackState(PlaybackState.Builder().setState(PlaybackState.STATE_PLAYING, 0, 1f).build())
+        s.setPlaybackToRemote(p)
+        s.isActive = true
+        session = s
+        sendPcVolume()
+    }
+
+    private fun stopRemoteVolume() {
+        try { session?.release() } catch (e: Exception) {}
+        session = null
+        provider = null
+    }
+
+    /** Silencia el teléfono mientras hay una PC conectada. */
+    @Synchronized
+    private fun muteForPc() {
+        if (savedVol < 0) savedVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+    }
+
+    /** Devuelve el volumen original del teléfono al desconectar. */
+    @Synchronized
+    private fun restorePhone() {
+        if (savedVol >= 0) {
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, savedVol, 0)
+            savedVol = -1
+        }
     }
 
     private fun closeClient() {
@@ -182,6 +259,8 @@ class AudioService : Service() {
         obsThread?.quitSafely()
         try { server?.close() } catch (e: Exception) {}
         closeClient()
+        stopRemoteVolume()
+        restorePhone()
         projection?.stop()
         super.onDestroy()
     }

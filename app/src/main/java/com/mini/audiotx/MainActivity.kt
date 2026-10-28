@@ -7,19 +7,22 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.TextView
 
 class MainActivity : Activity() {
     private lateinit var btn: Button
+    private lateinit var chk: CheckBox
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 96, 48, 48) }
         val info = TextView(this).apply {
-            text = "Transmite el audio del teléfono a la PC.\nEl volumen del teléfono se aplica en la PC."
+            text = "Transmite el audio del teléfono a la PC.\nCon la casilla activa, el teléfono se silencia mientras está conectado y sus botones de volumen controlan el volumen de la PC. Al desconectar, todo vuelve a la normalidad."
             textSize = 16f
         }
+        chk = CheckBox(this).apply { text = "Silenciar el teléfono mientras está conectado a la PC"; isChecked = true }
         btn = Button(this)
         btn.setOnClickListener {
             if (AudioService.running) {
@@ -29,7 +32,7 @@ class MainActivity : Activity() {
                 requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
             } else askProjection()
         }
-        box.addView(info); box.addView(btn)
+        box.addView(info); box.addView(chk); box.addView(btn)
         setContentView(box)
     }
 
@@ -50,7 +53,7 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         if (req == 1 && res == RESULT_OK && data != null) {
-            val i = Intent(this, AudioService::class.java).putExtra("code", res).putExtra("data", data)
+            val i = Intent(this, AudioService::class.java).putExtra("code", res).putExtra("data", data).putExtra("mute", chk.isChecked)
             startForegroundService(i)
             btn.postDelayed({ refresh() }, 500)
         }
