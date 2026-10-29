@@ -83,6 +83,11 @@ static void play(char *data, int len) {
     if (!started && ++queued >= PREBUF) { waveOutRestart(hwo); started = 1; }
 }
 
+/* adb borra el reenvio de puerto cuando se desconecta el cable: hay que recrearlo */
+static void ensure_forward(void) {
+    system("adb forward --remove tcp:7000 >nul 2>&1 & adb forward tcp:7000 tcp:7000 >nul 2>&1");
+}
+
 static BOOL WINAPI on_close(DWORD ev) {
     /* Se llama al cerrar la ventana con la X, Ctrl+C, cerrar sesion, etc. */
     if (hwo) waveOutReset(hwo);
@@ -94,7 +99,7 @@ static BOOL WINAPI on_close(DWORD ev) {
 int main(void) {
     WSADATA w;
     static char pl[BUFSZ];
-    int got = 0, waiting = 0;
+    int got = 0, waiting = 0, fails = 0, waits = 0;
     WSAStartup(MAKEWORD(2, 2), &w);
     SetConsoleCtrlHandler(on_close, TRUE);
     printf("Receptor de audio del telefono\n");
@@ -110,7 +115,13 @@ int main(void) {
         a.sin_family = AF_INET;
         a.sin_port = htons(PORT);
         a.sin_addr.s_addr = inet_addr("127.0.0.1");
-        if (connect(s, (struct sockaddr *)&a, sizeof a) != 0) { closesocket(s); Sleep(1000); continue; }
+        if (connect(s, (struct sockaddr *)&a, sizeof a) != 0) {
+            closesocket(s);
+            if (fails++ % 3 == 0) ensure_forward();
+            Sleep(1000);
+            continue;
+        }
+        fails = 0;
         setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char *)&nd, sizeof nd);
         got = 0;
         while (recv_all(s, hd, 3)) {
@@ -125,9 +136,14 @@ int main(void) {
         closesocket(s);
         if (got) {
             printf("\nDesconectado. Esperando al telefono...\n");
-        } else if (!waiting) {
-            printf("Esperando al telefono (abre la app AudioTx y pulsa Iniciar)...\n");
-            waiting = 1;
+            waits = 0;
+            ensure_forward();
+        } else {
+            if (!waiting) {
+                printf("Esperando al telefono (abre la app AudioTx y pulsa Iniciar)...\n");
+                waiting = 1;
+            }
+            if (waits++ % 5 == 4) ensure_forward(); /* recrea el reenvio si adb lo perdio */
         }
         Sleep(1000);
     }
