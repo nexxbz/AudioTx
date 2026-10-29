@@ -41,6 +41,7 @@ class AudioService : Service() {
         @Volatile var running = false
         @Volatile var instance: AudioService? = null
         @Volatile var pcControl = false
+        @Volatile var onStopped: (() -> Unit)? = null
         const val PORT = 7000
     }
 
@@ -153,6 +154,7 @@ class AudioService : Service() {
                 closeClient()
                 stopRemoteVolume()
                 restorePhone()
+                if (!stopping) { fail("PC desconectada. Pulsa Iniciar para volver a conectar"); return }
             }
         } catch (e: Exception) {
             if (!stopping) fail("Error: ${e.message}")
@@ -298,6 +300,7 @@ class AudioService : Service() {
         running = false
         instance = null
         pcControl = false
+        Handler(Looper.getMainLooper()).post { onStopped?.invoke() }
         observer?.let { contentResolver.unregisterContentObserver(it) }
         obsThread?.quitSafely()
         try { server?.close() } catch (e: Exception) {}

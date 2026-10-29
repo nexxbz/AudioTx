@@ -42,7 +42,9 @@ class MainActivity : Activity() {
         setContentView(box)
     }
 
-    override fun onResume() { super.onResume(); refresh() }
+    override fun onResume() { super.onResume(); AudioService.onStopped = { refresh() }; refresh() }
+
+    override fun onPause() { AudioService.onStopped = null; super.onPause() }
 
     private fun refresh() {
         btn.text = if (AudioService.running) "Detener transmisión" else "Iniciar transmisión"
